@@ -1,0 +1,9 @@
+# Bỏ qua các file object sinh ra khi biên dịch
+src/*.o
+*.o
+
+# Bỏ qua file thực thi của hệ điều hành
+os
+
+# Bỏ qua file nén nộp bài
+*.zip
