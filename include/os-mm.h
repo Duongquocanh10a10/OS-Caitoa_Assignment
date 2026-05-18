@@ -1,151 +1,66 @@
-/*
- * Copyright (C) 2026 pdnguyen of HCMC University of Technology VNU-HCM
- */
+#ifndef MM64_H
+#define MM64_H
 
-/* Caitoa release
- * Source Code License Grant: The authors hereby grant to Licensee
- * personal permission to use and modify the Licensed Source Code
- * for the sole purpose of studying while attending the course CO2018.
- */
+#include "mm.h"
+#define MM64_BITS_PER_LONG 64
 
-#ifndef OSMM_H
-#define OSMM_H
+#define PAGING64_CPU_BUS_WIDTH 57 /* 57 bit bus - MAX SPACE 4MB */
+#define PAGING64_PAGESZ  4096      /* 4KB or 12-bits PAGE NUMBER */
 
-#include <stdint.h>
+#define GENMASK64(h, l) \
+	(((~0ULL) << (l)) & (~0ULL >> (MM64_BITS_PER_LONG  - (h) - 1)))
 
-#define MM_PAGING
-#define PAGING_MAX_MMSWP 4 /* max number of supported swapped space */
-#define PAGING_MAX_SYMTBL_SZ 30
-
-/* 
- * @bksysnet: in long address mode of 64bit or original 32bit
- * the address type need to be redefined
- */
-
-#ifdef MM64
-#define ADDR_TYPE uint64_t
-#else
-#define ADDR_TYPE uint32_t
-#endif
-
-typedef char BYTE;
-typedef ADDR_TYPE addr_t;
-//typedef unsigned int uint32_t;
-
-/* 
- * @bksysnet: the format string need to be redefined
- *            based on the address mode
- */
-#ifdef MM64
-#define FORMAT_ADDR "%lu"
-#define FORMATX_ADDR "%16p"
-#else
-#define FORMAT_ADDR "%d"
-#define FORMATX_ADDR "%08x"
-#endif
-
-struct pgn_t{
-   addr_t pgn;
-   struct pgn_t *pg_next; 
-};
-
-/*
- *  Memory region struct
- */
-struct vm_rg_struct {
-   int vmaid;
-
-   addr_t rg_start;
-   addr_t rg_end;
-
-   struct vm_rg_struct *rg_next;
-};
-
-/*
- *  Memory area struct
- */
-struct vm_area_struct {
-   unsigned long vm_id;
-   addr_t vm_start;
-   addr_t vm_end;
-
-   addr_t sbrk;
-/*
- * Derived field
- * unsigned long vm_limit = vm_end - vm_start
- */
-   struct mm_struct *vm_mm;
-   struct vm_rg_struct *vm_freerg_list;
-   struct vm_area_struct *vm_next;
-};
+#define PAGING64_MAX_PGN  (DIV_ROUND_UP(BIT_ULL(21),PAGING64_PAGESZ))
+#define PAGING64_PAGE_ALIGNSZ(sz) (DIV_ROUND_UP(sz,PAGING64_PAGESZ)*PAGING64_PAGESZ)
 
 
-/* 
- * Kernel cache pool struct
- */
-struct kcache_pool_struct {
-   int size;
-   int align;
+/* OFFSET */
+#define PAGING64_ADDR_OFFST_HIBIT 11
+#define PAGING64_ADDR_OFFST_LOBIT 0
 
-#ifdef MM64
-   addr_t storage;
-#else
-   uint32_t storage;
-#endif
-};
+/* PT */
+#define PAGING64_ADDR_PT_HIBIT 20
+#define PAGING64_ADDR_PT_LOBIT 12
+#define PAGING64_ADDR_PT_SHIFT 12
 
+/* PMD */
+#define PAGING64_ADDR_PMD_HIBIT 29
+#define PAGING64_ADDR_PMD_LOBIT 21
 
-/* 
- * Memory management struct
- */
-struct mm_struct {
-#ifdef MM64
-   addr_t *pgd;
-   addr_t *p4d;
-   addr_t *pud;
-   addr_t *pmd;
-   addr_t *pt;
-#else
-   uint32_t *pgd;
-#endif
+/* PUD */
+#define PAGING64_ADDR_PUD_HIBIT 38
+#define PAGING64_ADDR_PUD_LOBIT 30
 
-   struct vm_area_struct *mmap;
+/* P4D */
+#define PAGING64_ADDR_P4D_HIBIT 47
+#define PAGING64_ADDR_P4D_LOBIT 39
 
-   /* Currently we support a fixed number of symbol */
-   struct vm_rg_struct symrgtbl[PAGING_MAX_SYMTBL_SZ];
+/* PGD */
+#define PAGING64_ADDR_PGD_HIBIT 56
+#define PAGING64_ADDR_PGD_LOBIT 48
 
-   /* list of free page */
-   struct pgn_t *fifo_pgn;
-
-   /* kmem cache pool */
-   struct kcache_pool_struct *kcpooltbl;
-
-};
+/* Extract PGD Entry */
+#define PAGING64_ADDR_OFFST(addr) GETVAL(addr,PAGING_ADDR_OFFST_MASK,PAGING_ADDR_OFFST_LOBIT)
+#define PAGING64_ADDR_PT(addr)   ((addr&PAGING64_ADDR_PT_MASK)>>PAGING64_ADDR_PT_LOBIT)
+//GETVAL(addr,PAGING64_ADDR_PT_MASK,PAGING64_ADDR_PT_LOBIT)
+#define PAGING64_ADDR_PMD(addr)   ((addr&PAGING64_ADDR_PMD_MASK)>>PAGING64_ADDR_PMD_LOBIT)
+//GETVAL(addr,PAGING64_ADDR_PMD_MASK,PAGING64_ADDR_PMD_LOBIT)
+#define PAGING64_ADDR_PUD(addr)   ((addr&PAGING64_ADDR_PUD_MASK)>>PAGING64_ADDR_PUD_LOBIT)
+//GETVAL(addr,PAGING64_ADDR_PUD_MASK,PAGING64_ADDR_PUD_LOBIT)
+#define PAGING64_ADDR_P4D(addr)   ((addr&PAGING64_ADDR_P4D_MASK)>>PAGING64_ADDR_P4D_LOBIT)
+//GETVAL(addr,PAGING64_ADDR_P4D_MASK,PAGING64_ADDR_P4D_LOBIT)
+#define PAGING64_ADDR_PGD(addr)   ((addr&PAGING64_ADDR_PGD_MASK)>>PAGING64_ADDR_PGD_LOBIT)
+//GETVAL(addr,PAGING64_ADDR_PGD_MASK,PAGING64_ADDR_PGD_LOBIT)
 
 
-/*
- * FRAME/MEM PHY struct
- */
-struct framephy_struct { 
-   addr_t fpn;
-   struct framephy_struct *fp_next;
+/* Masks */
+#define PAGING64_ADDR_OFFST_MASK  GENMASK64(PAGING_ADDR_OFFST_HIBIT,PAGING_ADDR_OFFST_LOBIT)
+#define PAGING64_ADDR_PT_MASK  GENMASK64(PAGING64_ADDR_PT_HIBIT,PAGING64_ADDR_PT_LOBIT)
+#define PAGING64_ADDR_PMD_MASK  GENMASK64(PAGING64_ADDR_PMD_HIBIT,PAGING64_ADDR_PMD_LOBIT)
+#define PAGING64_ADDR_PUD_MASK  GENMASK64(PAGING64_ADDR_PUD_HIBIT,PAGING64_ADDR_PUD_LOBIT)
+#define PAGING64_ADDR_P4D_MASK  GENMASK64(PAGING64_ADDR_P4D_HIBIT,PAGING64_ADDR_P4D_LOBIT)
+#define PAGING64_ADDR_PGD_MASK  GENMASK64(PAGING64_ADDR_PGD_HIBIT,PAGING64_ADDR_PGD_LOBIT)
 
-   /* Resereed for tracking allocated framed */
-   struct mm_struct* owner;
-};
 
-struct memphy_struct {
-   /* Basic field of data and size */
-   BYTE *storage;
-   int maxsz;
-   
-   /* Sequential device fields */ 
-   int rdmflg;
-   int cursor;
-
-   /* Management structure */
-   struct framephy_struct *free_fp_list;
-   struct framephy_struct *used_fp_list;
-};
 
 #endif
