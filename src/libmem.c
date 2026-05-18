@@ -88,7 +88,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
   }
 
   /* TODO get_free_vmrg_area FAILED handle the region management (Fig.6)*/
-
+  
   /*Attempt to increate limit to get space */
 #ifdef MM64
   inc_sz = (uint32_t)(size/(int)PAGING64_PAGESZ);
@@ -121,6 +121,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
   *alloc_addr = old_sbrk;
 
   pthread_mutex_unlock(&mmvm_lock);
+  
   return 0;
 
 }
@@ -642,25 +643,63 @@ int free_pcb_memph(struct pcb_t *caller)
  */
 int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
 {
-  struct pgn_t *pg = mm->fifo_pgn;
+  if (mm == NULL || retpgn == NULL || mm->fifo_pgn == NULL)
+        return -1;
 
-  /* TODO: Implement the theorical mechanism to find the victim page */
-  if (!pg)
-  {
+    while (1)
+    {
+        struct pgn_t *pg = mm->fifo_pgn;
+        struct pgn_t *prev = NULL;
+
+        while (pg != NULL)
+        {
+            addr_t pgd = 0, p4d = 0, pud = 0, pmd = 0, pt = 0;
+            addr_t pgn = pg->pgn;
+
+            get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
+
+            uint32_t pte = (uint32_t)mm->pt[pt];
+
+            /*
+             * If referenced bit is set, give second chance:
+             * clear the bit and skip this page.
+             */
+            if (pte & PAGING_PTE_REFERENCED_MASK)
+            {
+                CLRBIT(pte, PAGING_PTE_REFERENCED_MASK);
+                mm->pt[pt] = pte;
+
+                prev = pg;
+                pg = pg->pg_next;
+                continue;
+            }
+
+            /*
+             * If referenced bit is not set, choose this page as victim.
+             */
+            *retpgn = pgn;
+
+            if (prev == NULL)
+            {
+                mm->fifo_pgn = pg->pg_next;
+            }
+            else
+            {
+                prev->pg_next = pg->pg_next;
+            }
+
+            free(pg);
+
+            return 0;
+        }
+
+        /*
+         * If we reached here, all pages had referenced bit = 1.
+         * They were all cleared, so repeat scan and pick one next time.
+         */
+    }
+
     return -1;
-  }
-  struct pgn_t *prev = NULL;
-  while (pg->pg_next)
-  {
-    prev = pg;
-    pg = pg->pg_next;
-  }
-  *retpgn = pg->pgn;
-  prev->pg_next = NULL;
-
-  free(pg);
-
-  return 0;
 }
 
 /*get_free_vmrg_area - get a free vm region
@@ -671,62 +710,83 @@ int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
  */
 int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_struct *newrg)
 {
-  struct vm_area_struct *cur_vma = get_vma_by_num(caller->krnl->mm, vmaid);
+  struct vm_area_struct *cur_vma;
+  struct vm_rg_struct *rgit;
+  struct vm_rg_struct *best = NULL;
 
-  struct vm_rg_struct *rgit = cur_vma->vm_freerg_list;
+  addr_t best_size = 0;
+
+  if (caller == NULL || caller->krnl == NULL || caller->krnl->mm == NULL || newrg == NULL)
+      return -1;
+
+  cur_vma = get_vma_by_num(caller->krnl->mm, vmaid);
+
+  if (cur_vma == NULL)
+      return -1;
+
+  rgit = cur_vma->vm_freerg_list;
 
   if (rgit == NULL)
-    return -1;
+      return -1;
 
-  /* Probe unintialized newrg */
   newrg->rg_start = newrg->rg_end = -1;
 
-  /* Traverse on list of free vm region to find a fit space */
   while (rgit != NULL)
-  {
-    if (rgit->rg_start + size <= rgit->rg_end)
-    { /* Current region has enough space */
-      newrg->rg_start = rgit->rg_start;
-      newrg->rg_end = rgit->rg_start + size;
+    {
+        addr_t rg_size = rgit->rg_end - rgit->rg_start;
 
-      /* Update left space in chosen region */
-      if (rgit->rg_start + size < rgit->rg_end)
-      {
-        rgit->rg_start = rgit->rg_start + size;
-      }
-      else
-      { /*Use up all space, remove current node */
-        /*Clone next rg node */
-        struct vm_rg_struct *nextrg = rgit->rg_next;
-
-        /*Cloning */
-        if (nextrg != NULL)
+        if (rg_size >= size)
         {
-          rgit->rg_start = nextrg->rg_start;
-          rgit->rg_end = nextrg->rg_end;
-
-          rgit->rg_next = nextrg->rg_next;
-
-          free(nextrg);
+            if (best == NULL || rg_size < best_size)
+            {
+                best = rgit;
+                best_size = rg_size;
+            }
         }
-        else
-        {                                /*End of free list */
-          rgit->rg_start = rgit->rg_end; // dummy, size 0 region
-          rgit->rg_next = NULL;
-        }
-      }
-      break;
+
+        rgit = rgit->rg_next;
+    }
+
+    if (best == NULL)
+        return -1;
+
+    /*
+     * Allocate from the beginning of the best-fit region.
+     */
+    newrg->rg_start = best->rg_start;
+    newrg->rg_end = best->rg_start + size;
+
+    /*
+     * Shrink remaining free space.
+     */
+    if (best->rg_start + size < best->rg_end)
+    {
+        best->rg_start += size;
     }
     else
     {
-      rgit = rgit->rg_next; // Traverse next rg
+        /*
+         * Region fully used.
+         * Remove by cloning next node, same style as your original code.
+         */
+        struct vm_rg_struct *nextrg = best->rg_next;
+
+        if (nextrg != NULL)
+        {
+            best->rg_start = nextrg->rg_start;
+            best->rg_end = nextrg->rg_end;
+            best->rg_next = nextrg->rg_next;
+
+            free(nextrg);
+        }
+        else
+        {
+            best->rg_start = best->rg_end;
+            best->rg_next = NULL;
+        }
     }
-  }
 
-  if (newrg->rg_start == -1) // new region not found
-    return -1;
-
-  return 0;
+    return 0;
 }
 
 // #endif
