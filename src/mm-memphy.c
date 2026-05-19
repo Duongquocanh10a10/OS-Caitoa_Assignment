@@ -173,6 +173,36 @@ int MEMPHY_dump(struct memphy_struct *mp)
   /*TODO dump memphy contnt mp->storage
    *     for tracing the memory content
    */
+   if(!mp || !(mp->storage)){
+      printf("memphy dump: storage not initialized\n");
+      return -1;
+   }
+
+   printf("\nStorage trace (first %d bytes)\n", PAGING_PAGESZ);
+   printf("Addr     00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  |ASCII|\n");
+
+   int dump_limit = (mp->maxsz < PAGING_PAGESZ) ? mp->maxsz : PAGING_PAGESZ;
+   for(int i = 0; i < dump_limit; i += 16){
+      int line_len =(dump_limit - i < 16) ?(dump_limit - i) : 16;
+      printf("%08x ", i);
+      for(int j = 0; j < 16; j++){
+         if(j < line_len){
+            BYTE b = mp->storage[i + j];
+            printf("%02x ", (unsigned)b);
+         }
+         else{
+            printf("   ");
+         }
+      }
+
+      printf(" |");
+      for (int j = 0; j < line_len; j++){
+         BYTE b = mp->storage[i + j];
+         unsigned char bu = (unsigned char)b;
+         printf("%c", (bu>=32 && bu<= 126) ? bu : '.');
+      }
+      printf("|\n");
+   }
    return 0;
 }
 
