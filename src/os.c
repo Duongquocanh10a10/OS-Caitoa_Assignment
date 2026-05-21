@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
+// modify the os.c
 static int time_slot;
 static int num_cpus;
 static int done = 0;

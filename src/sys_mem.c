@@ -13,6 +13,7 @@
 #include "libmem.h"
 #include "queue.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 #ifdef MM64
 #include "mm64.h"
@@ -20,37 +21,38 @@
 #include "mm.h"
 #endif
 
-//typedef char BYTE;
-
 int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
 {
    int memop = regs->a1;
    BYTE value;
-   
-   /* TODO THIS DUMMY CREATE EMPTY PROC TO AVOID COMPILER NOTIFY 
-    *      need to be eliminated
-	*/
-   struct pcb_t *caller = malloc(sizeof(struct pcb_t));
-   caller->krnl = malloc(sizeof(struct krnl_t));
 
    /*
-    * @bksysnet: Please note in the dual spacing design
-    *            syscall implementations are in kernel space.
+    * Find the calling process from the kernel's running list by PID.
+    * Direct PCB passing from user space is prohibited — we traverse the
+    * running list to obtain the PCB for the given PID.
     */
+   struct pcb_t *caller = NULL;
+   struct queue_t *running_list = krnl->running_list;
+   if (running_list) {
+      for (int i = 0; i < running_list->size; i++) {
+         if (running_list->proc[i] && running_list->proc[i]->pid == pid) {
+            caller = running_list->proc[i];
+            break;
+         }
+      }
+   }
 
-   /* TODO: Traverse proclist to terminate the proc
-    *       stcmp to check the process match proc_name
-    */
-//	struct queue_t *running_list = krnl->running_list;
+   /* Fallback proxy: keeps IO ops functional even if not in running_list */
+   struct pcb_t proxy;
+   if (!caller) {
+      proxy.krnl = krnl;
+      proxy.pid  = pid;
+      caller = &proxy;
+   }
 
-    /* TODO Maching and marking the process */
-    /* user process are not allowed to access directly pcb in kernel space of syscall */
-    //....
-	
    switch (memop) {
    case SYSMEM_MAP_OP:
-            /* Reserved process case*/
-			vmap_pgd_memset(caller, regs->a2, regs->a3);
+            vmap_pgd_memset(caller, regs->a2, regs->a3);
             break;
    case SYSMEM_INC_OP:
             inc_vma_limit(caller, regs->a2, regs->a3);
@@ -69,8 +71,6 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
             printf("Memop code: %d\n", memop);
             break;
    }
-   
+
    return 0;
 }
-
-

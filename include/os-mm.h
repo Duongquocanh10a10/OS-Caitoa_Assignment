@@ -159,4 +159,5 @@ struct memphy_struct {
    struct framephy_struct *used_fp_list;
 };
 
-#endif
+
+#endif /* OSMM_H */
