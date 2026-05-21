@@ -169,12 +169,6 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
 
   /*enlist the obsoleted memory region */
   enlist_vm_freerg_list(caller->krnl->mm, freerg_node);
-  int start_pgn = PAGING_PGN(start_addr);
-  int end_pgn = PAGING_PGN(end_addr);
-
-  for(int pgn = start_pgn; pgn < end_pgn; pgn++){
-    caller->krnl->mm->pgd[pgn] = 0; 
-  }
 
   pthread_mutex_unlock(&mmvm_lock);
   return 0;
@@ -218,7 +212,6 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
   {
     return -1;
   }
-printf("%s:%d\n",__func__,__LINE__);
 #ifdef IODUMP
   /* TODO dump IO content (if needed) */
   printf("Freed: reg_index: %d, PID: %d \n", reg_index, proc->pid);
@@ -459,7 +452,6 @@ int libread(
     uint32_t* destination)
 {
   BYTE data;
-  printf("%s:%d\n",__func__,__LINE__);
   int val = __read(proc, 0, source, offset, &data);
   if(val == -1) return -1;
   *destination = data;
@@ -893,10 +885,7 @@ return -1;
  */
 int __read_user_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE *data)
 {
-  /* TODO: provide OS level management user memory access */
-  //krnl->pgd ...
   return __read(caller, vmaid, rgid, offset, data);
-   return 0;
 }
 
 
@@ -909,10 +898,7 @@ int __read_user_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BY
  */
 int __write_user_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE value)
 {
-  /* TODO: provide OS level management user memory access */
-  //krnl->pgd ...
   return __write(caller, vmaid, rgid, offset, value);
-  return 0;
 }
 
 

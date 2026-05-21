@@ -413,32 +413,77 @@ addr_t alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_st
 addr_t vm_map_ram(struct pcb_t *caller, addr_t astart, addr_t aend, addr_t mapstart, int incpgnum, struct vm_rg_struct *ret_rg)
 {
   struct framephy_struct *frm_lst = NULL;
-  addr_t ret_alloc = 0;
-//int pgnum = incpgnum;
+  addr_t ret_alloc;
 
-  /*@bksysnet: author provides a feasible solution of getting frames
-   *FATAL logic in here, wrong behaviour if we have not enough page
-   *i.e. we request 1000 frames meanwhile our RAM has size of 3 frames
-   *Don't try to perform that case in this simple work, it will result
-   *in endless procedure of swap-off to get frame and we have not provide
-   *duplicate control mechanism, keep it simple
-   */
-  // ret_alloc = alloc_pages_range(caller, pgnum, &frm_lst);
+  ret_alloc = alloc_pages_range(caller, incpgnum, &frm_lst);
 
   if (ret_alloc < 0 && ret_alloc != -3000)
     return -1;
 
-  /* Out of memory */
   if (ret_alloc == -3000)
-  {
-    return -1;
-  }
+    return -1; /* Out of physical memory */
 
-  /* it leaves the case of memory is enough but half in ram, half in swap
-   * do the swaping all to swapper to get the all in ram */
-   vmap_page_range(caller, mapstart, incpgnum, frm_lst, ret_rg);
+  vmap_page_range(caller, mapstart, incpgnum, frm_lst, ret_rg);
 
   return 0;
+}
+
+/*
+ * vm_map_range - map a user VM range to RAM (delegates to vm_map_ram)
+ */
+addr_t vm_map_range(struct pcb_t *caller, addr_t astart, addr_t aend,
+                    addr_t mapstart, int incpgnum, struct vm_rg_struct *ret_rg)
+{
+  return vm_map_ram(caller, astart, aend, mapstart, incpgnum, ret_rg);
+}
+
+/*
+ * vm_map_kernel - map a kernel VM range to RAM and wire krnl_pgd directly.
+ * The kernel page table is treated as a flat array indexed by page number.
+ */
+addr_t vm_map_kernel(struct pcb_t *caller, addr_t astart, addr_t aend,
+                     addr_t mapstart, int incpgnum, struct vm_rg_struct *ret_rg)
+{
+  if (!caller || !caller->krnl || incpgnum <= 0) return -1;
+
+  struct framephy_struct *frm_lst = NULL;
+  addr_t ret_alloc = alloc_pages_range(caller, incpgnum, &frm_lst);
+
+  if (ret_alloc < 0 && ret_alloc != -3000) return -1;
+  if (ret_alloc == -3000) return -1;
+
+  struct krnl_t *krnl = caller->krnl;
+  struct framephy_struct *fpit = frm_lst;
+  int pgit = 0;
+  addr_t pgn;
+
+  ret_rg->rg_start = mapstart;
+  ret_rg->rg_end   = mapstart + (addr_t)incpgnum * PAGING_PAGESZ;
+  ret_rg->vmaid    = -1; /* kernel space marker */
+
+  while (pgit < incpgnum && fpit != NULL) {
+    pgn = PAGING_PGN(mapstart) + pgit;
+
+    uint32_t pte = 0;
+    SETBIT(pte, PAGING_PTE_PRESENT_MASK);
+    CLRBIT(pte, PAGING_PTE_SWAPPED_MASK);
+    SETVAL(pte, fpit->fpn, PAGING_PTE_FPN_MASK, PAGING_PTE_FPN_LOBIT);
+
+    krnl->krnl_pgd[pgn] = pte;
+    krnl->krnl_pt[pgn]  = pte;
+
+    pgit++;
+    fpit = fpit->fp_next;
+  }
+
+  /* Release frame-list nodes (frames themselves are now wired) */
+  while (frm_lst) {
+    struct framephy_struct *tmp = frm_lst->fp_next;
+    free(frm_lst);
+    frm_lst = tmp;
+  }
+
+  return mapstart;
 }
 
 /* Swap copy content page from source frame to destination frame
