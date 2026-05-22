@@ -2,6 +2,9 @@
 #define MM64_H
 
 #include "mm.h"
+#include <pthread.h>
+extern pthread_mutex_t mmvm_lock;
+
 #define MM64_BITS_PER_LONG 64
 
 #define PAGING64_CPU_BUS_WIDTH 57 /* 57 bit bus - MAX SPACE 4MB */
