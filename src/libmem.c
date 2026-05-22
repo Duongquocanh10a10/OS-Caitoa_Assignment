@@ -454,7 +454,7 @@ int libread(
     char dirmask = (pte & PAGING_PTE_DIRTY_MASK)? 'D': '-';
     char resmask = (pte & PAGING_PTE_RESERVE_MASK)? 'R': '-';
     printf("IODump: PID: %u. ", proc->pid);
-    printf("Write rg=%u, off=%u, vaddrr=0x%05x, pgn=%d, offpg=%d val=0x%02x, ", source, (unsigned)offset, vaddr, pgn, off, data);
+    printf("Write rg=%u, off=%u, vaddrr=0x%05lx, pgn=%d, offpg=%d val=0x%02x, ", source, (unsigned)offset, vaddr, pgn, off, data);
     printf("P:%c, D:%c, R:%c\n", premask, dirmask, resmask);
   }
 #ifdef PAGETBL_DUMP
@@ -517,7 +517,7 @@ int libwrite(
     char dirmask = (pte & PAGING_PTE_DIRTY_MASK)? 'D': '-';
     char resmask = (pte & PAGING_PTE_RESERVE_MASK)? 'R': '-';
     printf("IODump: PID: %u. ", proc->pid);
-    printf("Write rg=%u, off=%u, vaddrr=0x%05x, pgn=%d, offpg=%d val=0x%02x, ", 
+    printf("Write rg=%u, off=%u, vaddrr=0x%05lx, pgn=%d, offpg=%d val=0x%02x, ", 
       destination, (unsigned)offset, vaddr, pgn, off, data);
     printf("P:%c, D:%c, R:%c\n", premask, dirmask, resmask);
     
