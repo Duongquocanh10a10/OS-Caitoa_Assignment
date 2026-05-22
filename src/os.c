@@ -163,7 +163,7 @@ static void * ld_routine(void * args) {
 		add_proc(proc);
 		free(ld_processes.path[i]);
 		i++;
-		//next_slot(timer_id);
+		next_slot(timer_id);
 	}
 	free(ld_processes.path);
 	free(ld_processes.start_time);

@@ -58,25 +58,32 @@ void init_scheduler(void) {
  */
 struct pcb_t * get_mlq_proc(void) {
 	struct pcb_t * proc = NULL;
-	static int curr_prio = 0;
-	int scanned = 0;
 	pthread_mutex_lock(&queue_lock);
 	/*TODO: get a process from PRIORITY [ready_queue].
 	 *      It worth to protect by a mechanism.
 	 * */
-	while(scanned < MAX_PRIO){
-		if(!empty(&mlq_ready_queue[curr_prio]) && slot[curr_prio] > 0){
-			proc = dequeue(&mlq_ready_queue[curr_prio]);
-			if(proc!=NULL){
-				slot[curr_prio]--;
+	/* Always prefer the highest-priority ready level that still has quota. */
+	for (int prio = 0; prio < MAX_PRIO; prio++) {
+		if (!empty(&mlq_ready_queue[prio]) && slot[prio] > 0) {
+			proc = dequeue(&mlq_ready_queue[prio]);
+			slot[prio]--;
+			break;
+		}
+	}
+	if (proc == NULL) {
+		/* Every level's quota is spent (or only lower-priority work remains):
+		 * refill all quotas and take the highest-priority ready process. */
+		for (int p = 0; p < MAX_PRIO; p++)
+			slot[p] = MAX_PRIO - p;
+		for (int prio = 0; prio < MAX_PRIO; prio++) {
+			if (!empty(&mlq_ready_queue[prio])) {
+				proc = dequeue(&mlq_ready_queue[prio]);
+				slot[prio]--;
 				break;
 			}
 		}
-		slot[curr_prio] = MAX_PRIO - curr_prio;
-		curr_prio = (curr_prio + 1) % MAX_PRIO;
-		scanned++;
 	}
-	if (proc != NULL) 
+	if (proc != NULL)
 		enqueue(&running_list, proc);
 
 	pthread_mutex_unlock(&queue_lock);
