@@ -12,6 +12,7 @@
 #define OSMM_H
 
 #include <stdint.h>
+#include <inttypes.h>
 
 #define MM_PAGING
 #define PAGING_MAX_MMSWP 4 /* max number of supported swapped space */
@@ -39,10 +40,10 @@ typedef ADDR_TYPE addr_t;
  *            based on the address mode
  */
 #ifdef MM64
-#define FORMAT_ADDR "%lu"
-#define FORMATX_ADDR "%16p"
+#define FORMAT_ADDR "%" PRIu64
+#define FORMATX_ADDR "%016" PRIx64
 #else
-#define FORMAT_ADDR "%d"
+#define FORMAT_ADDR "%u"
 #define FORMATX_ADDR "%08x"
 #endif
 

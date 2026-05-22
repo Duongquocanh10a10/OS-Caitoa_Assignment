@@ -68,6 +68,7 @@ static void * cpu_routine(void * args) {
 			/* The porcess has finish it job */
 			printf("\tCPU %d: Processed %2d has finished\n",
 				id ,proc->pid);
+			finish_proc(proc);
 			free(proc);
 			proc = get_proc();
 			time_left = 0;
@@ -137,7 +138,12 @@ static void * ld_routine(void * args) {
 	printf("ld_routine\n");
 	while (i < num_processes) {
 		struct pcb_t * proc = load(ld_processes.path[i]);
-		struct krnl_t * krnl = proc->krnl = &os;	
+
+		/* Each process gets its own krnl_t so that krnl->mm is per-process.
+		 * Shared physical memory and kernel page tables are copied by value. */
+		struct krnl_t * krnl = malloc(sizeof(struct krnl_t));
+		*krnl = os;
+		proc->krnl = krnl;
 
 #ifdef MLQ_SCHED
 		proc->prio = ld_processes.prio[i];
@@ -277,10 +283,7 @@ int main(int argc, char * argv[]) {
 	/* Init scheduler */
 	init_scheduler();
 	
-	/*init MM sync*/
-	pthread_mutex_init(&mmvm_lock, NULL);
-
-	/* Run CPU and loader */
+/* Run CPU and loader */
 #ifdef MM_PAGING
 	pthread_create(&ld, NULL, ld_routine, (void*)mm_ld_args);
 #else

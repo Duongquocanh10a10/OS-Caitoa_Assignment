@@ -26,6 +26,7 @@
 
 static pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
 
+
 /*enlist_vm_freerg_list - add new rg to freerg_list
  *@mm: memory region
  *@rg_elmt: new region
@@ -89,38 +90,25 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
     return 0;
   }
 
-  /* TODO get_free_vmrg_area FAILED handle the region management (Fig.6)*/
-
-  /*Attempt to increate limit to get space */
-#ifdef MM64
-  inc_sz = (uint32_t)(size/(int)PAGING64_PAGESZ)+1;
-  addr_t alloc_sz = inc_sz * PAGING_PAGESZ;
-#else
-  inc_sz = PAGING_PAGE_ALIGNSZ(size);
-#endif
-  int old_sbrk = cur_vma->sbrk;
-
-  /* TODO INCREASE THE LIMIT
-   * SYSCALL 1 sys_memmap
-   */
+  /* get_free_vmrg_area FAILED — extend VMA then retry */
   struct sc_regs regs;
   regs.a1 = SYSMEM_INC_OP;
   regs.a2 = vmaid;
-#ifdef MM64
   regs.a3 = size;
-#else
-  regs.a3 = PAGING_PAGE_ALIGNSZ(size);
-#endif  
-  if(_syscall(caller->krnl, caller->pid, 17, &regs) !=0){
+  if (_syscall(caller->krnl, caller->pid, 17, &regs) != 0) {
     pthread_mutex_unlock(&mmvm_lock);
     return -1;
   }
-  cur_vma->sbrk = old_sbrk + alloc_sz;
-  /*Successful increase limit */
-  caller->krnl->mm->symrgtbl[rgid].rg_start = old_sbrk;
-  caller->krnl->mm->symrgtbl[rgid].rg_end = old_sbrk + size;
 
-  *alloc_addr = old_sbrk;
+  /* inc_vma_limit added new space to the free list — get it from there */
+  if (get_free_vmrg_area(caller, vmaid, size, &rgnode) != 0) {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+
+  caller->krnl->mm->symrgtbl[rgid].rg_start = rgnode.rg_start;
+  caller->krnl->mm->symrgtbl[rgid].rg_end   = rgnode.rg_end;
+  *alloc_addr = rgnode.rg_start;
 
   pthread_mutex_unlock(&mmvm_lock);
   return 0;
@@ -264,7 +252,11 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
       }
 
       pte_set_fpn(caller, pgn, tgtfpn);
+#ifdef MM64
+      SETBIT(mm->pt[pgn & 0x1FF], PAGING_PTE_RESERVE_MASK);
+#else
       SETBIT(mm->pgd[pgn], PAGING_PTE_RESERVE_MASK);
+#endif
       enlist_pgn_node(&mm->fifo_pgn, pgn);
 
       pte = pte_get_entry(caller, pgn);
@@ -304,7 +296,11 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
     /* Update page table */
     //pte_set_swap(...);
     pte_set_swap(caller, vicpgn, 0, swpfpn);
+#ifdef MM64
+    CLRBIT(mm->pt[vicpgn & 0x1FF], PAGING_PTE_PRESENT_MASK);
+#else
     CLRBIT(mm->pgd[vicpgn], PAGING_PTE_PRESENT_MASK);
+#endif
     if(vic_swap){
       MEMPHY_put_freefp(caller->krnl->active_mswp, vic_swpfpn);
     }
@@ -323,8 +319,13 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
     /* Update its online status of the target page */
     //pte_set_fpn(...);
     pte_set_fpn(caller, pgn, vicfpn);
+#ifdef MM64
+    SETBIT(mm->pt[pgn & 0x1FF], PAGING_PTE_RESERVE_MASK);
+    CLRBIT(mm->pt[pgn & 0x1FF], PAGING_PTE_DIRTY_MASK);
+#else
     SETBIT(mm->pgd[pgn], PAGING_PTE_RESERVE_MASK);
     CLRBIT(mm->pgd[pgn], PAGING_PTE_DIRTY_MASK);
+#endif
     enlist_pgn_node(&mm->fifo_pgn, pgn);
     pte = pte_get_entry(caller, pgn);
     if(!PAGING_PAGE_PRESENT(pte) || (pte & PAGING_PTE_SWAPPED_MASK)) return -1;
@@ -350,10 +351,14 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
     return -1; /* invalid page access */
 
   int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
+#ifdef MM64
+  SETBIT(mm->pt[pgn & 0x1FF], PAGING_PTE_RESERVE_MASK);
+#else
   SETBIT(mm->pgd[pgn], PAGING_PTE_RESERVE_MASK);
-  /* TODO 
+#endif
+  /* TODO
    *  MEMPHY_read(caller->krnl->mram, phyaddr, data);
-   *  MEMPHY READ 
+   *  MEMPHY READ
    *  SYSCALL 17 sys_memmap with SYSMEM_IO_READ
    */
 
@@ -394,8 +399,17 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
   regs.a2 = phyaddr;
   regs.a3 = value;
   _syscall(caller->krnl, caller->pid, 17, &regs);
+#ifdef MM64
+  {
+    addr_t pgd_i=0, p4d_i=0, pud_i=0, pmd_i=0, pt_i=0;
+    get_pd_from_pagenum(pgn, &pgd_i, &p4d_i, &pud_i, &pmd_i, &pt_i);
+    SETBIT(mm->pt[pt_i], PAGING_PTE_RESERVE_MASK);
+    SETBIT(mm->pt[pt_i], PAGING_PTE_DIRTY_MASK);
+  }
+#else
   SETBIT(mm->pgd[pgn], PAGING_PTE_RESERVE_MASK);
   SETBIT(mm->pgd[pgn], PAGING_PTE_DIRTY_MASK);
+#endif
   return 0;
 }
 
