@@ -137,7 +137,9 @@ static void * ld_routine(void * args) {
 	printf("ld_routine\n");
 	while (i < num_processes) {
 		struct pcb_t * proc = load(ld_processes.path[i]);
-		struct krnl_t * krnl = proc->krnl = &os;	
+		struct krnl_t *krnl = malloc(sizeof(struct krnl_t));
+		*krnl = os;
+		proc->krnl = krnl;
 
 #ifdef MLQ_SCHED
 		proc->prio = ld_processes.prio[i];
@@ -157,7 +159,7 @@ static void * ld_routine(void * args) {
 		add_proc(proc);
 		free(ld_processes.path[i]);
 		i++;
-		next_slot(timer_id);
+		//next_slot(timer_id);
 	}
 	free(ld_processes.path);
 	free(ld_processes.start_time);
@@ -267,7 +269,14 @@ int main(int argc, char * argv[]) {
 
 	mm_ld_args->timer_id = ld_event;
 	mm_ld_args->mram = (struct memphy_struct *) &mram;
-	mm_ld_args->mswp = (struct memphy_struct**) &mswp;
+	struct memphy_struct **mswp_ptrs =
+    malloc(sizeof(struct memphy_struct*) * PAGING_MAX_MMSWP);
+
+	for (int i = 0; i < PAGING_MAX_MMSWP; i++) {
+		mswp_ptrs[i] = &mswp[i];
+	}
+
+	mm_ld_args->mswp = mswp_ptrs;
 	mm_ld_args->active_mswp = (struct memphy_struct *) &mswp[0];
         mm_ld_args->active_mswp_id = 0;
 
