@@ -3,7 +3,6 @@
 
 #include "mm.h"
 #include <pthread.h>
-extern pthread_mutex_t mmvm_lock;
 
 #define MM64_BITS_PER_LONG 64
 

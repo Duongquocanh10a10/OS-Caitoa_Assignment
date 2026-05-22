@@ -8,6 +8,7 @@
  * for the sole purpose of studying while attending the course CO2018.
  */
 
+#include "common.h"
 #include "os-mm.h"
 #include "syscall.h"
 #include "libmem.h"
@@ -26,29 +27,12 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
    int memop = regs->a1;
    BYTE value;
 
-   /*
-    * Find the calling process from the kernel's running list by PID.
-    * Direct PCB passing from user space is prohibited — we traverse the
-    * running list to obtain the PCB for the given PID.
-    */
-   struct pcb_t *caller = NULL;
-   struct queue_t *running_list = krnl->running_list;
-   if (running_list) {
-      for (int i = 0; i < running_list->size; i++) {
-         if (running_list->proc[i] && running_list->proc[i]->pid == pid) {
-            caller = running_list->proc[i];
-            break;
-         }
-      }
-   }
-
-   /* Fallback proxy: keeps IO ops functional even if not in running_list */
+   /* The krnl argument is already proc->krnl from the call site,
+    * so build a proxy directly rather than searching the running_list. */
    struct pcb_t proxy;
-   if (!caller) {
-      proxy.krnl = krnl;
-      proxy.pid  = pid;
-      caller = &proxy;
-   }
+   proxy.krnl = krnl;
+   proxy.pid  = pid;
+   struct pcb_t *caller = &proxy;
 
    switch (memop) {
    case SYSMEM_MAP_OP:

@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 
-pthread_mutex_t mmvm_lock;
+pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
 #if defined(MM64)
 
 /*
@@ -524,7 +524,7 @@ int __swap_cp_page(struct memphy_struct *mpsrc, addr_t srcfpn,
  */
 int init_mm(struct mm_struct *mm, struct pcb_t *caller)
 {
-  struct vm_area_struct *vma0 = malloc(sizeof(struct vm_area_struct));
+  struct vm_area_struct *vma0 = calloc(1, sizeof(struct vm_area_struct));
 
   /* TODO init page table directory */
   mm->pgd = (addr_t *) calloc(512, sizeof(addr_t));

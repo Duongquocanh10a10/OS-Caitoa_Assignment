@@ -127,6 +127,13 @@ void put_proc(struct pcb_t * proc) {
 void add_proc(struct pcb_t * proc) {
 	return add_mlq_proc(proc);
 }
+
+void finish_proc(struct pcb_t *proc) {
+	if (!proc) return;
+	pthread_mutex_lock(&queue_lock);
+	purgequeue(&running_list, proc);
+	pthread_mutex_unlock(&queue_lock);
+}
 #else
 struct pcb_t * get_proc(void) {
 	struct pcb_t * proc = NULL;
