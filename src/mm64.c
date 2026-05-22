@@ -591,7 +591,11 @@ int enlist_pgn_node(struct pgn_t **plist, addr_t pgn)
 {
   pthread_mutex_lock(&mmvm_lock);
   struct pgn_t *pnode = malloc(sizeof(struct pgn_t));
-
+  if (pnode == NULL) {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+  
   pnode->pgn = pgn;
   pnode->pg_next = *plist;
   *plist = pnode;
@@ -663,45 +667,20 @@ int print_list_pgn(struct pgn_t *ip)
 
 int print_pgtbl(struct pcb_t *caller, addr_t start, addr_t end)
 {
-  addr_t pgn_start, pgn_end;
-  addr_t pgit;
+  if (!caller || !caller->krnl || !caller->krnl->mm)
+    return -1;
 
-  addr_t pgd=0;
-  addr_t p4d=0;
-  addr_t pud=0;
-  addr_t pmd=0;
-  addr_t pt=0;
-
-  /* TODO traverse the page map and dump the page directory entries */
   pthread_mutex_lock(&mmvm_lock);
-  struct mm_struct *mm =
-        caller->krnl->mm;
 
-    pgn_start = PAGING_PGN(start);
+  struct mm_struct *mm = caller->krnl->mm;
 
-    pgn_end = PAGING_PGN(end);
+  printf("print_pgtbl:\n");
+  printf(" PGD=%p P4D=%p PUD=%p PMD=%p\n",
+         (void *)mm->pgd,
+         (void *)mm->p4d,
+         (void *)mm->pud,
+         (void *)mm->pmd);
 
-    for (pgit = pgn_start; pgit <= pgn_end; pgit++){
-        get_pd_from_pagenum(pgit, &pgd, &p4d, &pud, &pmd, &pt);
-
-        printf("PGN[%lu] "
-            "PGD[%lu] "
-            "P4D[%lu] "
-            "PUD[%lu] "
-            "PMD[%lu] "
-            "PT[%lu] "
-            "PTE=0x%08x\n",
-
-            pgit,
-            pgd,
-            p4d,
-            pud,
-            pmd,
-            pt,
-
-            (uint32_t) mm->pt[pt]
-        );
-    }
   pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
