@@ -152,8 +152,8 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
     return -1;
   }
 
-  addr_t start_addr = rgnode->rg_start;
-  addr_t end_addr = rgnode->rg_end;
+  //addr_t start_addr = rgnode->rg_start;
+  //addr_t end_addr = rgnode->rg_end;
 
   struct vm_rg_struct *freerg_node = malloc(sizeof(struct vm_rg_struct));
   if(!freerg_node){
@@ -189,7 +189,7 @@ int liballoc(struct pcb_t *proc, addr_t size, uint32_t reg_index)
   }
 #ifdef IODUMP
   /* TODO dump IO content (if needed) */
-  printf("Alloc log: Alloc: %d bytes, reg_index: %d, addr: 0x%08x, PID: %d\n", size, reg_index, addr, proc->pid);
+  printf("Alloc log: Alloc: %ld bytes, reg_index: %d, addr: 0x%08lx, PID: %d\n", size, reg_index, addr, proc->pid);
 #ifdef PAGETBL_DUMP
   print_pgtbl(proc, 0, -1); // print max TBL
 #endif
@@ -470,7 +470,7 @@ int libread(
     char dirmask = (pte & PAGING_PTE_DIRTY_MASK)? 'D': '-';
     char resmask = (pte & PAGING_PTE_RESERVE_MASK)? 'R': '-';
     printf("IODump: PID: %u. ", proc->pid);
-    printf("Write rg=%u, off=%u, vaddrr=0x%05x, pgn=%d, offpg=%d val=0x%02x, ", source, (unsigned)offset, vaddr, pgn, off, data);
+    printf("Write rg=%u, off=%u, vaddrr=0x%05lx, pgn=%d, offpg=%d val=0x%02x, ", source, (unsigned)offset, vaddr, pgn, off, data);
     printf("P:%c, D:%c, R:%c\n", premask, dirmask, resmask);
   }
 #ifdef PAGETBL_DUMP
@@ -540,7 +540,7 @@ int libwrite(
     char dirmask = (pte & PAGING_PTE_DIRTY_MASK)? 'D': '-';
     char resmask = (pte & PAGING_PTE_RESERVE_MASK)? 'R': '-';
     printf("IODump: PID: %u. ", proc->pid);
-    printf("Write rg=%u, off=%u, vaddrr=0x%05x, pgn=%d, offpg=%d val=0x%02x, ", 
+    printf("Write rg=%u, off=%u, vaddrr=0x%05lx, pgn=%d, offpg=%d val=0x%02x, ", 
       destination, (unsigned)offset, vaddr, pgn, off, data);
     printf("P:%c, D:%c, R:%c\n", premask, dirmask, resmask);
     
