@@ -1,0 +1,17 @@
+# Compiled object files
+obj/
+src/*.o
+*.o
+
+# Built executables (os simulator + standalone module testers)
+os
+os.exe
+mem
+sched
+pdg
+
+# Auto-generated syscall table
+src/syscalltbl.lst
+
+# Submission archives
+*.zip

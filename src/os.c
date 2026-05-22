@@ -199,11 +199,33 @@ static void read_config(const char * path) {
 	 * Format: (size=0 result non-used memswap, must have RAM and at least 1 SWAP)
 	 *        MEM_RAM_SZ MEM_SWP0_SZ MEM_SWP1_SZ MEM_SWP2_SZ MEM_SWP3_SZ
 	*/
-	fscanf(file, FORMAT_ARG "\n", &memramsz);
-	for(sit = 0; sit < PAGING_MAX_MMSWP; sit++)
-		fscanf(file, FORMAT_ARG, &(memswpsz[sit])); 
+	/* Legacy configs omit the memory line and jump straight to process
+	 * entries. Peek the next line: if its 2nd token is numeric it is the
+	 * memory-size line; otherwise it is a process entry (legacy format) and
+	 * we fall back to default sizes. */
+	long mem_pos = ftell(file);
+	char peekline[256];
+	int has_memline = 0;
+	if (fgets(peekline, sizeof(peekline), file) != NULL) {
+		char tok1[64] = "", tok2[64] = "";
+		if (sscanf(peekline, "%63s %63s", tok1, tok2) >= 2
+		    && tok2[0] >= '0' && tok2[0] <= '9')
+			has_memline = 1;
+	}
+	fseek(file, mem_pos, SEEK_SET);
 
-       fscanf(file, "\n"); /* Final character */
+	if (has_memline) {
+		fscanf(file, FORMAT_ARG "\n", &memramsz);
+		for(sit = 0; sit < PAGING_MAX_MMSWP; sit++)
+			fscanf(file, FORMAT_ARG, &(memswpsz[sit]));
+
+		fscanf(file, "\n"); /* Final character */
+	} else {
+		memramsz = 0x100000;     /* 1 MB RAM */
+		memswpsz[0] = 0x1000000; /* 16 MB swap */
+		for(sit = 1; sit < PAGING_MAX_MMSWP; sit++)
+			memswpsz[sit] = 0;
+	}
 #endif
 #endif
 

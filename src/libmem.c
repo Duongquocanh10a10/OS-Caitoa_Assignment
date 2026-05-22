@@ -24,7 +24,10 @@
 #include <unistd.h>
 #include <pthread.h>
 
-//static pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Shared with the page-table layer: single definition lives in mm64.c so that
+ * region operations here and page-table operations there serialize on the same
+ * mutex (previously this was a separate static lock with the same name). */
+extern pthread_mutex_t mmvm_lock;
 
 /*enlist_vm_freerg_list - add new rg to freerg_list
  *@mm: memory region
@@ -627,7 +630,10 @@ int libkmem_cache_pool_create(struct pcb_t *caller, uint32_t size, uint32_t alig
 
   if (krnl->mm->kcpooltbl == NULL){
     krnl->mm->kcpooltbl = calloc(MAX_POOLSZ, sizeof(struct kcache_pool_struct));
-    if (!krnl->mm->kcpooltbl) return -1;
+    if (!krnl->mm->kcpooltbl){
+      pthread_mutex_unlock(&mmvm_lock);
+      return -1;
+    }
   }
   /* prevent accidental overwrite of an active pool */
   if(krnl->mm->kcpooltbl[cache_pool_id].size != 0){
