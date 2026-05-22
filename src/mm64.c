@@ -18,7 +18,9 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
+#include <pthread.h>
 
+pthread_mutex_t mmvm_lock;
 #if defined(MM64)
 
 /*
@@ -107,8 +109,10 @@ int get_pd_from_pagenum(addr_t pgn, addr_t* pgd, addr_t* p4d, addr_t* pud, addr_
 int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
 {
 //struct krnl_t *krnl = caller->krnl;
-
+  pthread_mutex_lock(&mmvm_lock);
+  struct mm_struct *mm = caller->krnl->mm;
   addr_t *pte;
+
   addr_t pgd=0;
   addr_t p4d=0;
   addr_t pud=0;
@@ -117,8 +121,6 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
 	
   // dummy pte alloc to avoid runtime error
 #ifdef MM64	
-  struct mm_struct *mm = caller->krnl->mm;
-
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
 
   mm->pgd[pgd] = pgd;
@@ -138,7 +140,7 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
 
   SETVAL(*pte, swptyp, PAGING_PTE_SWPTYP_MASK, PAGING_PTE_SWPTYP_LOBIT);
   SETVAL(*pte, swpoff, PAGING_PTE_SWPOFF_MASK, PAGING_PTE_SWPOFF_LOBIT);
-
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -149,6 +151,7 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
  */
 int pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn)
 {
+  pthread_mutex_lock(&mmvm_lock);
   struct mm_struct *mm = caller->krnl->mm;
 
   addr_t *pte;
@@ -179,7 +182,7 @@ int pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn)
   CLRBIT(*pte, PAGING_PTE_DIRTY_MASK);
 
   SETVAL(*pte, fpn, PAGING_PTE_FPN_MASK, PAGING_PTE_FPN_LOBIT);
-
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -201,69 +204,72 @@ void tlb_invalidate(struct mm_struct *mm, addr_t vpn)
  **/
 uint32_t pte_get_entry(struct pcb_t *caller, addr_t pgn)
 {
-    struct mm_struct *mm = caller->krnl->mm;
+  pthread_mutex_lock(&mmvm_lock);
+  struct mm_struct *mm = caller->krnl->mm;
 
-    uint32_t pte = 0;
+  uint32_t pte = 0;
 
-    addr_t pgd=0;
-    addr_t p4d=0;
-    addr_t pud=0;
-    addr_t pmd=0;
-    addr_t pt=0;
+  addr_t pgd=0;
+  addr_t p4d=0;
+  addr_t pud=0;
+  addr_t pmd=0;
+  addr_t pt=0;
 
-    /* TLB lookup */
-    for (int i = 0; i < TLB_SIZE; i++) {
+  /* TLB lookup */
+  for (int i = 0; i < TLB_SIZE; i++) {
 
-        if (mm->tlb[i].valid &&
-            mm->tlb[i].vpn == pgn){
-            SETBIT(mm->tlb[i].pte,
-                  PAGING_PTE_REFERENCED_MASK);
+      if (mm->tlb[i].valid &&
+          mm->tlb[i].vpn == pgn){
+          SETBIT(mm->tlb[i].pte,
+                PAGING_PTE_REFERENCED_MASK);
 
-            get_pd_from_pagenum(
-                pgn,
-                &pgd,
-                &p4d,
-                &pud,
-                &pmd,
-                &pt
-            );
+          get_pd_from_pagenum(
+              pgn,
+              &pgd,
+              &p4d,
+              &pud,
+              &pmd,
+              &pt
+          );
 
-            mm->pt[pt] = mm->tlb[i].pte;
+          mm->pt[pt] = mm->tlb[i].pte;
+          pthread_mutex_unlock(&mmvm_lock);
+          return mm->tlb[i].pte;
+      }
+  }
 
-            return mm->tlb[i].pte;
-        }
-    }
-
-    /* Page walk */
-    get_pd_from_pagenum(
-        pgn,
-        &pgd,
-        &p4d,
-        &pud,
-        &pmd,
-        &pt
-    );
-    pte = mm->pt[pt];
-    
-    if (!PAGING_PAGE_PRESENT(pte))
+  /* Page walk */
+  get_pd_from_pagenum(
+      pgn,
+      &pgd,
+      &p4d,
+      &pud,
+      &pmd,
+      &pt
+  );
+  pte = mm->pt[pt];
+  
+  if (!PAGING_PAGE_PRESENT(pte)){
+    pthread_mutex_unlock(&mmvm_lock);
     return 0;
+  }
 
-    /* Set referenced bit */
-    SETBIT(pte, PAGING_PTE_REFERENCED_MASK);
+  /* Set referenced bit */
+  SETBIT(pte, PAGING_PTE_REFERENCED_MASK);
 
-    mm->pt[pt] = pte;
+  mm->pt[pt] = pte;
 
-    /* Insert into TLB */
-    int victim = mm->tlb_replace;
+  /* Insert into TLB */
+  int victim = mm->tlb_replace;
 
-    mm->tlb[victim].valid = 1;
-    mm->tlb[victim].vpn   = pgn;
-    mm->tlb[victim].pte   = pte;
+  mm->tlb[victim].valid = 1;
+  mm->tlb[victim].vpn   = pgn;
+  mm->tlb[victim].pte   = pte;
 
-    mm->tlb_replace =
-        (victim + 1) % TLB_SIZE;
-
-    return pte;
+  mm->tlb_replace =
+      (victim + 1) % TLB_SIZE;
+  pthread_mutex_unlock(&mmvm_lock);
+  return pte;
 
 }
 
@@ -274,8 +280,8 @@ uint32_t pte_get_entry(struct pcb_t *caller, addr_t pgn)
  **/
 int pte_set_entry(struct pcb_t *caller, addr_t pgn, uint32_t pte_val)
 {
+  pthread_mutex_lock(&mmvm_lock);
 	struct mm_struct *mm = caller->krnl->mm;
-  uint32_t pte = 0;
   addr_t pgd=0;
   addr_t p4d=0;
   addr_t pud=0;
@@ -286,6 +292,7 @@ int pte_set_entry(struct pcb_t *caller, addr_t pgn, uint32_t pte_val)
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
 	tlb_invalidate(mm, pgn);
   mm->pt[pt] = pte_val;
+  pthread_mutex_unlock(&mmvm_lock);
 	return 0;
 }
 
@@ -582,12 +589,13 @@ int enlist_vm_rg_node(struct vm_rg_struct **rglist, struct vm_rg_struct *rgnode)
 
 int enlist_pgn_node(struct pgn_t **plist, addr_t pgn)
 {
+  pthread_mutex_lock(&mmvm_lock);
   struct pgn_t *pnode = malloc(sizeof(struct pgn_t));
 
   pnode->pgn = pgn;
   pnode->pg_next = *plist;
   *plist = pnode;
-
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -657,7 +665,6 @@ int print_pgtbl(struct pcb_t *caller, addr_t start, addr_t end)
 {
   addr_t pgn_start, pgn_end;
   addr_t pgit;
-  struct krnl_t *krnl = caller->krnl;
 
   addr_t pgd=0;
   addr_t p4d=0;
@@ -665,9 +672,8 @@ int print_pgtbl(struct pcb_t *caller, addr_t start, addr_t end)
   addr_t pmd=0;
   addr_t pt=0;
 
-  get_pd_from_address(start, &pgd, &p4d, &pud, &pmd, &pt);
-
   /* TODO traverse the page map and dump the page directory entries */
+  pthread_mutex_lock(&mmvm_lock);
   struct mm_struct *mm =
         caller->krnl->mm;
 
@@ -696,6 +702,7 @@ int print_pgtbl(struct pcb_t *caller, addr_t start, addr_t end)
             (uint32_t) mm->pt[pt]
         );
     }
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 

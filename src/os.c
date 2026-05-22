@@ -245,6 +245,7 @@ int main(int argc, char * argv[]) {
 	}
 	struct timer_id_t * ld_event = attach_event();
 	start_timer();
+	
 
 #ifdef MM_PAGING
 	/* Init all MEMPHY include 1 MEMRAM and n of MEMSWP */
@@ -275,6 +276,9 @@ int main(int argc, char * argv[]) {
 
 	/* Init scheduler */
 	init_scheduler();
+	
+	/*init MM sync*/
+	pthread_mutex_init(&mmvm_lock, NULL);
 
 	/* Run CPU and loader */
 #ifdef MM_PAGING
