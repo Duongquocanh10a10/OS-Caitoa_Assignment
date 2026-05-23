@@ -24,10 +24,7 @@
 #include <unistd.h>
 #include <pthread.h>
 
-/* Shared with the page-table layer: single definition lives in mm64.c so that
- * region operations here and page-table operations there serialize on the same
- * mutex (previously this was a separate static lock with the same name). */
-extern pthread_mutex_t mmvm_lock;
+static pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*enlist_vm_freerg_list - add new rg to freerg_list
  *@mm: memory region
@@ -76,10 +73,9 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
   /*Allocate at the toproof */
   if(!caller || !caller->krnl || !caller->krnl->mm || !alloc_addr) return -1;
   if (rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ) return -1;
-  //pthread_mutex_lock(&mmvm_lock);
+  pthread_mutex_lock(&mmvm_lock);
   struct vm_rg_struct rgnode;
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->krnl->mm, vmaid);
-  if (cur_vma == NULL) return -1;
   int inc_sz=0;
 
   if (get_free_vmrg_area(caller, vmaid, size, &rgnode) == 0)
@@ -89,7 +85,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
  
     *alloc_addr = rgnode.rg_start;
 
-    //pthread_mutex_unlock(&mmvm_lock);
+    pthread_mutex_unlock(&mmvm_lock);
     return 0;
   }
 
@@ -97,16 +93,22 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
 
   /*Attempt to increate limit to get space */
 #ifdef MM64
-  inc_sz = (uint32_t)(size/(int)PAGING64_PAGESZ)+1;
-  addr_t alloc_sz = inc_sz * PAGING_PAGESZ;
+  inc_sz = (uint32_t)(size/(int)PAGING64_PAGESZ);
+  inc_sz = inc_sz + 1;
+  
 #else
   inc_sz = PAGING_PAGE_ALIGNSZ(size);
 #endif
-  int old_sbrk = cur_vma->sbrk;
+  int old_sbrk;
+  addr_t alloc_sz = inc_sz * PAGING_PAGESZ;
+  inc_sz = inc_sz + 1;
+
+  old_sbrk = cur_vma->sbrk;
 
   /* TODO INCREASE THE LIMIT
    * SYSCALL 1 sys_memmap
    */
+  
   struct sc_regs regs;
   regs.a1 = SYSMEM_INC_OP;
   regs.a2 = vmaid;
@@ -115,8 +117,10 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
 #else
   regs.a3 = PAGING_PAGE_ALIGNSZ(size);
 #endif  
-  if(_syscall(caller->krnl, caller->pid, 17, &regs) !=0){
-    //pthread_mutex_unlock(&mmvm_lock);
+
+  int syscheck = _syscall(caller->krnl, caller->pid, 17, &regs); /* SYSCALL 17 sys_memmap */
+  if(syscheck < 0){
+    pthread_mutex_unlock(&mmvm_lock);
     return -1;
   }
   cur_vma->sbrk = old_sbrk + alloc_sz;
@@ -126,7 +130,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
 
   *alloc_addr = old_sbrk;
 
-  //pthread_mutex_unlock(&mmvm_lock);
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 
 }
@@ -140,24 +144,22 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
  */
 int __free(struct pcb_t *caller, int vmaid, int rgid)
 {
-  if (!caller || !caller->krnl || !caller->krnl->mm) return -1;
-  if (rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ) return -1;
-  //pthread_mutex_lock(&mmvm_lock);
+  pthread_mutex_lock(&mmvm_lock);
+  if (rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ)
+  { 
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
   
   /* TODO: Manage the collect freed region to freerg_list */
   struct vm_rg_struct *rgnode = get_symrg_byid(caller->krnl->mm, rgid);
-  if(!rgnode){
-    return -1;
-  }
+
   if (rgnode->rg_start == 0 && rgnode->rg_end == 0)
   {
+    pthread_mutex_unlock(&mmvm_lock);
     return -1;
   }
-
   struct vm_rg_struct *freerg_node = malloc(sizeof(struct vm_rg_struct));
-  if(!freerg_node){
-    return -1;
-  }
   freerg_node->rg_start = rgnode->rg_start;
   freerg_node->rg_end = rgnode->rg_end;
   freerg_node->rg_next = NULL;
@@ -168,6 +170,7 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
   /*enlist the obsoleted memory region */
   enlist_vm_freerg_list(caller->krnl->mm, freerg_node);
 
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -178,18 +181,15 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
  */
 int liballoc(struct pcb_t *proc, addr_t size, uint32_t reg_index)
 {
-  
   addr_t  addr;
   int val = __alloc(proc, 0, reg_index, size, &addr);
   if (val == -1)
   {
     return -1;
   }
-  
 #ifdef IODUMP
   /* TODO dump IO content (if needed) */
-  printf("liballoc: " FORMAT_ADDR "\n", size);
-  //printf("Alloc log: Alloc: %d bytes, reg_index: %d, addr: 0x%08x, PID: %d\n", size, reg_index, addr, proc->pid);
+  printf("%s:%d\n",__func__,__LINE__);
 #ifdef PAGETBL_DUMP
   print_pgtbl(proc, 0, -1); // print max TBL
 #endif
@@ -212,9 +212,10 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
   {
     return -1;
   }
+  printf("%s:%d\n",__func__,__LINE__);
 #ifdef IODUMP
   /* TODO dump IO content (if needed) */
-  printf("Freed: reg_index: %d, PID: %d \n", reg_index, proc->pid);
+
 #ifdef PAGETBL_DUMP
   print_pgtbl(proc, 0, -1); // print max TBL
 #endif
@@ -231,18 +232,16 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
  */
 int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 {
-  if(!mm || !caller || !fpn){
-    return -1;
-  }
-  if(pgn<0 || pgn>=PAGING_MAX_PGN){
-    return -1;
-  }
+
   uint32_t pte = pte_get_entry(caller, pgn);
-  if (PAGING_PAGE_PRESENT(pte) && !(pte & PAGING_PTE_SWAPPED_MASK)) {
+  if (PAGING_PAGE_PRESENT(pte) && !(pte & PAGING_PTE_SWAPPED_MASK))
+  //if (PAGING_PAGE_PRESENT(pte))
+  {
     *fpn = PAGING_FPN(pte);
     return 0;
   }
   if (!PAGING_PAGE_PRESENT(pte) || (pte & PAGING_PTE_SWAPPED_MASK))
+  //if (!PAGING_PAGE_PRESENT(pte))
   { /* Page is not online, make it actively living */
     addr_t vicpgn, swpfpn;
     addr_t vicfpn;
@@ -345,17 +344,23 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
   addr_t off = PAGING_OFFST(addr);
   int fpn;
 
-  if (pg_getpage(mm, pgn, &fpn, caller) != 0) return -1;
+  if (pg_getpage(mm, pgn, &fpn, caller) != 0)
+    return -1; /* invalid page access */
 
-  if(MEMPHY_read(caller->krnl->mram, fpn * PAGING_PAGESZ + off, data) != 0) return -1;
-  #ifdef MM64
-  addr_t pgd = 0, p4d = 0, pud = 0, pmd = 0, pt = 0;
-  get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
+  int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
 
-  SETBIT(mm->pt[pt], PAGING_PTE_REFERENCED_MASK);
-#else
-  SETBIT(mm->pt[pt], PAGING_PTE_REFERENCED_MASK);
-#endif
+  /* TODO 
+   *  MEMPHY_read(caller->krnl->mram, phyaddr, data);
+   *  MEMPHY READ 
+   *  SYSCALL 17 sys_memmap with SYSMEM_IO_READ
+   */
+  MEMPHY_read(caller->krnl->mram, phyaddr, data);
+  struct sc_regs regs;
+  regs.a1 = SYSMEM_IO_READ;
+  regs.a2 = phyaddr;
+  _syscall(caller->krnl, caller->pid, 17, &regs);
+  SETBIT(mm->pgd[pgn], PAGING_PTE_REFERENCED_MASK);
+
   return 0;
 
 }
@@ -372,25 +377,26 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
   addr_t off = PAGING_OFFST(addr);
   int fpn;
 
+  /* Get the page to MEMRAM, swap from MEMSWAP if needed */
   if (pg_getpage(mm, pgn, &fpn, caller) != 0)
-    return -1;
+    return -1; /* invalid page access */
 
-  addr_t phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
-
-  if (MEMPHY_write(caller->krnl->mram, phyaddr, value) != 0)
-    return -1;
-
-#ifdef MM64
-  addr_t pgd = 0, p4d = 0, pud = 0, pmd = 0, pt = 0;
-  get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
-
-  SETBIT(mm->pt[pt], PAGING_PTE_RESERVE_MASK);
-  SETBIT(mm->pt[pt], PAGING_PTE_DIRTY_MASK);
-#else
+  int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
+  /* TODO 
+   *  MEMPHY_write(caller->krnl->mram, phyaddr, value);
+   *  MEMPHY WRITE with SYSMEM_IO_WRITE 
+   * SYSCALL 17 sys_memmap
+   */
+  
+  MEMPHY_write(caller->krnl->mram, phyaddr, value);
+  struct sc_regs regs;
+  regs.a1 = SYSMEM_IO_WRITE;
+  regs.a2 = phyaddr;
+  regs.a3 = value;
+  _syscall(caller->krnl, caller->pid, 17, &regs);
   SETBIT(mm->pgd[pgn], PAGING_PTE_RESERVE_MASK);
+  SETBIT(mm->pgd[pgn], PAGING_PTE_REFERENCED_MASK);
   SETBIT(mm->pgd[pgn], PAGING_PTE_DIRTY_MASK);
-#endif
-
   return 0;
 }
 
@@ -404,15 +410,9 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
  */
 int __read(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE *data)
 {
-  if(!caller || !caller->krnl || !caller->krnl->mm){
-    return -1;
-  }
-  if(rgid<0 || rgid>= PAGING_MAX_SYMTBL_SZ){
-    return -1;
-  }
-  if(!data){
-    return -1;
-  }
+  if(!caller || !caller->krnl || !caller->krnl->mm) return -1;
+  if(rgid<0 || rgid>= PAGING_MAX_SYMTBL_SZ) return -1;
+  if(!data) return -1;
   struct vm_rg_struct *currg = get_symrg_byid(caller->krnl->mm, rgid);
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->krnl->mm, vmaid);
 
@@ -427,9 +427,8 @@ int __read(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE *data)
     return -1;
   }
   
-  if(pg_getval(caller->krnl->mm, currg->rg_start + offset, data, caller)!=0){
-    return -1;
-  }
+  pg_getval(caller->krnl->mm, currg->rg_start + offset, data, caller);
+
   return 0;
 }
 
@@ -441,25 +440,11 @@ int libread(
     uint32_t* destination)
 {
   BYTE data;
+  printf("%s:%d\n",__func__,__LINE__);
   int val = __read(proc, 0, source, offset, &data);
-  if(val == -1) return -1;
   *destination = data;
 #ifdef IODUMP
   /* TODO dump IO content (if needed) */
-
-  struct vm_rg_struct *rg = get_symrg_byid(proc->krnl->mm, source);
-  if(rg && (rg->rg_start + offset < rg->rg_end)){
-    addr_t vaddr = rg->rg_start + offset;
-    int pgn = PAGING_PGN(vaddr);
-    int off = PAGING_OFFST(vaddr);
-    uint32_t pte = pte_get_entry(proc, pgn);
-    char premask = (pte & PAGING_PTE_PRESENT_MASK)? 'P': '-';
-    char dirmask = (pte & PAGING_PTE_DIRTY_MASK)? 'D': '-';
-    char resmask = (pte & PAGING_PTE_RESERVE_MASK)? 'R': '-';
-    printf("IODump: PID: %u. ", proc->pid);
-    printf("Write rg=%u, off=%u, vaddrr=0x%05lx, pgn=%d, offpg=%d val=0x%02x, ", source, (unsigned)offset, vaddr, pgn, off, data);
-    printf("P:%c, D:%c, R:%c\n", premask, dirmask, resmask);
-  }
 #ifdef PAGETBL_DUMP
   print_pgtbl(proc, 0, -1); // print max TBL
 #endif
@@ -478,21 +463,20 @@ int libread(
  */
 int __write(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE value)
 {
+  pthread_mutex_lock(&mmvm_lock);
   struct vm_rg_struct *currg = get_symrg_byid(caller->krnl->mm, rgid);
 
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->krnl->mm, vmaid);
 
   if (currg == NULL || cur_vma == NULL) /* Invalid memory identify */
   {
-    return -1;
-  }
-  if (offset >= (currg->rg_end - currg->rg_start)){
-    return -1;
-  }
-  if(pg_setval(caller->krnl->mm, currg->rg_start + offset, value, caller) !=0){
+    pthread_mutex_unlock(&mmvm_lock);
     return -1;
   }
 
+  pg_setval(caller->krnl->mm, currg->rg_start + offset, value, caller);
+
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -508,23 +492,9 @@ int libwrite(
   {
     return -1;
   }
+  printf("%s:%d\n",__func__,__LINE__);
 #ifdef IODUMP
   /* TODO dump IO content (if needed) */
-  struct vm_rg_struct *rg = get_symrg_byid(proc->krnl->mm, destination);
-  if(rg && (rg->rg_start + offset < rg->rg_end)){
-    addr_t vaddr = rg->rg_start + offset;
-    int pgn = PAGING_PGN(vaddr);
-    int off = PAGING_OFFST(vaddr);
-    uint32_t pte = pte_get_entry(proc, pgn);
-    char premask = (pte & PAGING_PTE_PRESENT_MASK)? 'P': '-';
-    char dirmask = (pte & PAGING_PTE_DIRTY_MASK)? 'D': '-';
-    char resmask = (pte & PAGING_PTE_RESERVE_MASK)? 'R': '-';
-    printf("IODump: PID: %u. ", proc->pid);
-    printf("Write rg=%u, off=%u, vaddrr=0x%05lx, pgn=%d, offpg=%d val=0x%02x, ", 
-      destination, (unsigned)offset, vaddr, pgn, off, data);
-    printf("P:%c, D:%c, R:%c\n", premask, dirmask, resmask);
-    
-  }
 #ifdef PAGETBL_DUMP
   print_pgtbl(proc, 0, -1); // print max TBL
 #endif
@@ -544,14 +514,17 @@ int libkmem_malloc(struct pcb_t * caller, uint32_t size, uint32_t reg_index)
   /* TODO: provide OS level management
    *       and forward the request to helper
    */
+//addr_t  addr;
+//int val = __kmalloc(caller, -1, reg_index, size, &addr);
 
   /* TODO: provide OS kmem allocation validation
    */
-  addr_t  addr;
+  
   if(!caller || !caller->krnl || !caller->krnl->mm) return -1;
   if(size==0) return -1;
   if(reg_index >= PAGING_MAX_SYMTBL_SZ) return -1;
 
+  addr_t addr;
   addr_t val = __kmalloc(caller, -1, reg_index, size, &addr);
   if(val < 0) return -1;
   return 0;
@@ -569,6 +542,10 @@ addr_t __kmalloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t 
 {
   /* TODO: provide OS kernel memory allocation
    *       update krnl_pgd for OS kernel level management */
+
+  //struct krnl_t *krnl = caller->krnl;
+  //krnl->symrgtbl...
+  //krnl->krnl_pgd ...
   addr_t err = -1;
   if(!caller || !caller->krnl || !caller->krnl->mm) return err;
   if(!alloc_addr) return err;
@@ -583,7 +560,7 @@ addr_t __kmalloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t 
   addr_t aligned_sz = PAGING_PAGE_ALIGNSZ(size);
   int incpgnum= (int)aligned_sz/PAGING_PAGESZ;
 
-  if(vm_map_kernel(caller, addr, addr + aligned_sz, addr, incpgnum, &ret_rg) != 0){
+  if(vm_map_kernel(caller, addr, addr + aligned_sz, addr, incpgnum, &ret_rg) < 0){
     struct framephy_struct *fp = frm_lst;
     while(fp){
       struct framephy_struct *n = fp->fp_next;
@@ -599,7 +576,6 @@ addr_t __kmalloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t 
   krnl->mm->symrgtbl[rgid].rg_end = *alloc_addr + size;
   krnl->mm->symrgtbl[rgid].rg_next = NULL;
   krnl->mm->mmap->sbrk = addr + aligned_sz;
-  //krnl->krnl_pgd ... in vm_map_kernel
   pthread_mutex_unlock(&mmvm_lock);
   return *alloc_addr;
 
@@ -615,28 +591,29 @@ int libkmem_cache_pool_create(struct pcb_t *caller, uint32_t size, uint32_t alig
 {
   /* TODO: provide OS level management */
 
+  //struct krnl_t *krnl = caller->krnl;
   //krnl->kcpooltbl...
   //krnl->krnl_pgd ...
-  if (!caller || !caller->krnl || !caller->krnl->mm) return -1;
-  if (size == 0 || align == 0) return -1;
+  if(!caller || !caller->krnl || !caller->krnl->mm) return -1;
+  if(size == 0 || align == 0) return -1;
   struct krnl_t *krnl = caller->krnl;
-  //may need changes later
+  //custom pool size (i don't see it)
   #ifndef MAX_POOLSZ
   #define MAX_POOLSZ 16
   #endif
   
-  if (cache_pool_id >= MAX_POOLSZ) return -1;
+  if(cache_pool_id >= MAX_POOLSZ) return -1;
   pthread_mutex_lock(&mmvm_lock);
 
-  if (krnl->mm->kcpooltbl == NULL){
+  if(krnl->mm->kcpooltbl == NULL){
     krnl->mm->kcpooltbl = calloc(MAX_POOLSZ, sizeof(struct kcache_pool_struct));
-    if (!krnl->mm->kcpooltbl){
+    if(!krnl->mm->kcpooltbl){
       pthread_mutex_unlock(&mmvm_lock);
       return -1;
     }
   }
-  /* prevent accidental overwrite of an active pool */
-  if(krnl->mm->kcpooltbl[cache_pool_id].size != 0){
+
+  if(krnl->mm->kcpooltbl[cache_pool_id].size < 0){
     pthread_mutex_unlock(&mmvm_lock);
     return -1;
   }
@@ -661,14 +638,15 @@ int libkmem_cache_alloc(struct pcb_t *proc, uint32_t cache_pool_id, uint32_t reg
   /* TODO: provide OS level management
    *       and forward the request to helper
    */
-  if (!proc || !proc->krnl) return -1;
+  if(reg_index >= PAGING_MAX_SYMTBL_SZ) return -1;
+  if(cache_pool_id >= MAX_POOLSZ) return -1;
+  if(!proc || !proc->krnl) return -1;
   addr_t addr = __kmem_cache_alloc(proc, -1, reg_index, cache_pool_id, &addr);
 
   //krnl->kcpooltbl...
   //krnl->krnl_pgd ...
   
-  if (reg_index >= PAGING_MAX_SYMTBL_SZ) return -1;
-  if (cache_pool_id >= MAX_POOLSZ) return -1;
+  
   if(addr == (addr_t)-1) return -1;
   return 0;
 
@@ -724,16 +702,15 @@ int libkmem_copy_from_user(struct pcb_t *caller, uint32_t source, uint32_t desti
    */
   //__read_user_mem(...)
   //__write_kernel_mem(...);
-  uint32_t i;
   BYTE data;
 
-  if (!caller || !caller->krnl || !caller->krnl->mm) return -1;
-  if (size == 0) return 0;
-  if (source >= PAGING_MAX_SYMTBL_SZ || destination >=PAGING_MAX_SYMTBL_SZ) return -1;
+  if(!caller || !caller->krnl || !caller->krnl->mm) return -1;
+  if(size == 0) return 0;
+  if(source >= PAGING_MAX_SYMTBL_SZ || destination >=PAGING_MAX_SYMTBL_SZ) return -1;
 
-  for (i = 0; i < size; i++) {
-    if (__read_user_mem(caller, 0, (int)source, (addr_t)(offset + i),&data) != 0) return -1;
-    if (__write_kernel_mem(caller, -1, (int)destination, (addr_t)(offset+ i), data) != 0) return -1;
+  for(int i = 0; i < size; i++){
+    __read_user_mem(caller, 0, (int)source, (addr_t)(offset + i),&data);
+    __write_kernel_mem(caller, -1, (int)destination, (addr_t)(offset+ i), data);
   }
 
   return 0;
@@ -749,16 +726,15 @@ int libkmem_copy_to_user(struct pcb_t *caller, uint32_t source, uint32_t destina
   //__read_kernel_mem(...)
   //__write_user_mem(...);
 
-  uint32_t i;
   BYTE data;
 
-  if (!caller || !caller->krnl || !caller->krnl->mm) return -1;
-  if (size == 0) return 0;
-  if (source >= PAGING_MAX_SYMTBL_SZ || destination >=PAGING_MAX_SYMTBL_SZ) return -1;
+  if(!caller || !caller->krnl || !caller->krnl->mm) return -1;
+  if(size == 0) return 0;
+  if(source >= PAGING_MAX_SYMTBL_SZ || destination >=PAGING_MAX_SYMTBL_SZ) return -1;
 
-  for (i = 0; i < size; i++) {
-    if (__read_kernel_mem(caller, -1, (int)source, (addr_t)(offset + i),&data) != 0) return -1;
-    if (__write_user_mem(caller, 0, (int)destination, (addr_t)(offset +i), data) != 0) return -1;
+  for(int i = 0; i < size; i++) {
+    __read_kernel_mem(caller, -1, (int)source, (addr_t)(offset + i),&data);
+    __write_user_mem(caller, 0, (int)destination, (addr_t)(offset +i), data);
   }
 
   return 0;
@@ -777,6 +753,9 @@ int __read_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, 
 {
   /* TODO: provide OS memory operator for kernel memory region */
   //krnl->krnl_pgd ... or krnl->pgd ... based on kmem implementation strategy
+  if (!caller || !caller->krnl || !caller->krnl->mm || !data) return -1;
+  if (rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ) return -1;
+  pthread_mutex_lock(&mmvm_lock);
   struct vm_rg_struct *currg;
   addr_t vaddr;
   int pgn, off;
@@ -784,20 +763,25 @@ int __read_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, 
   int fpn, phyaddr;
   struct sc_regs regs;
 
-  if (!caller || !caller->krnl || !caller->krnl->mm || !data) return -1;
-  if (rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ) return -1;
-
   currg = &caller->krnl->mm->symrgtbl[rgid];
-  if (currg->rg_start >= currg->rg_end) return -1;
-  if (offset >= (currg->rg_end - currg->rg_start)) return -1;
+  if (currg->rg_start >= currg->rg_end) {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+  if (offset >= (currg->rg_end - currg->rg_start)) {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
 
   vaddr = currg->rg_start + offset;
   pgn = (int)PAGING_PGN(vaddr);
   off = (int)PAGING_OFFST(vaddr);
 
   pte = caller->krnl->krnl_pgd[pgn];
-  if (!PAGING_PAGE_PRESENT(pte) || (pte & PAGING_PTE_SWAPPED_MASK))
-return -1;
+  if (!PAGING_PAGE_PRESENT(pte) || (pte & PAGING_PTE_SWAPPED_MASK)){
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
 
   fpn = (int)PAGING_FPN(pte);
   phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
@@ -807,6 +791,7 @@ return -1;
   _syscall(caller->krnl, caller->pid, 17, &regs);
   *data = (BYTE)regs.a3;
 
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 
 }
@@ -822,6 +807,9 @@ int __write_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset,
 {
   /* TODO: provide OS memory operator for kernel memory region */
   //krnl->krnl_pgd ... or krnl->pgd ... based on kmem implementation strategy
+  pthread_mutex_lock(&mmvm_lock);
+  if (!caller || !caller->krnl || !caller->krnl->mm) return -1;
+  if (rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ) return -1;
   struct vm_rg_struct *currg;
   addr_t vaddr;
   int pgn, off;
@@ -829,20 +817,25 @@ int __write_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset,
   int fpn, phyaddr;
   struct sc_regs regs;
 
-  if (!caller || !caller->krnl || !caller->krnl->mm) return -1;
-  if (rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ) return -1;
-
   currg = &caller->krnl->mm->symrgtbl[rgid];
-  if (currg->rg_start >= currg->rg_end) return -1;
-  if (offset >= (currg->rg_end - currg->rg_start)) return -1;
+  if (currg->rg_start >= currg->rg_end) {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+  if (offset >= (currg->rg_end - currg->rg_start)) {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
 
   vaddr = currg->rg_start + offset;
   pgn = (int)PAGING_PGN(vaddr);
   off = (int)PAGING_OFFST(vaddr);
 
   pte = caller->krnl->krnl_pgd[pgn];
-  if (!PAGING_PAGE_PRESENT(pte) || (pte & PAGING_PTE_SWAPPED_MASK))
-return -1;
+  if (!PAGING_PAGE_PRESENT(pte) || (pte & PAGING_PTE_SWAPPED_MASK)){
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
 
   fpn = (int)PAGING_FPN(pte);
   phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
@@ -854,7 +847,8 @@ return -1;
 
   SETBIT(caller->krnl->krnl_pgd[pgn], PAGING_PTE_RESERVE_MASK);
   SETBIT(caller->krnl->krnl_pgd[pgn], PAGING_PTE_DIRTY_MASK);
-
+  
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -867,6 +861,8 @@ return -1;
  */
 int __read_user_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE *data)
 {
+  /* TODO: provide OS level management user memory access */
+  //krnl->pgd ...
   return __read(caller, vmaid, rgid, offset, data);
 }
 
@@ -880,6 +876,8 @@ int __read_user_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BY
  */
 int __write_user_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BYTE value)
 {
+  /* TODO: provide OS level management user memory access */
+  //krnl->pgd ...
   return __write(caller, vmaid, rgid, offset, value);
 }
 
@@ -939,7 +937,7 @@ static void rotate_head_to_tail(struct pgn_t **head){
 int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
 {
   /* TODO: Implement the theorical mechanism to find the victim page */
-  if (!mm || !retpgn || !(mm->fifo_pgn)){
+  if(!mm || !retpgn || !(mm->fifo_pgn)){
     return -1;
   }
   struct pgn_t *pg = mm->fifo_pgn;
