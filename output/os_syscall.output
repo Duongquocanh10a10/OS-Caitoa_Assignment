@@ -2,28 +2,27 @@ Time slot   0
 ld_routine
 Time slot   1
 	Loaded a process at input/proc/sc2, PID: 1 PRIO: 15
+	CPU 0: Dispatched process  1
+liballoc: 100
+print_pgtbl:
+ PGD=0x7984980069e0 P4D=0x7984980079f0 PUD=0x798498008a00 PMD=0x798498009a10
 Time slot   2
-	CPU 0: Dispatched process  1
-liballoc:178
+IODump: PID: 1. Write rg=1, off=0, vaddrr=0x00000, pgn=0, offpg=0 val=0x50, P:P, D:-, R:R
 print_pgtbl:
- PDG=b5cfe220b5301d30 P4g=b5cfe220b5302d40 PUD=b5cfe220b5303d50 PMD=b5cfe220b5304d60
+ PGD=0x7984980069e0 P4D=0x7984980079f0 PUD=0x798498008a00 PMD=0x798498009a10
 Time slot   3
-libwrite:502
+	CPU 0: Put process  1 to run queue
+	CPU 0: Dispatched process  1
+IODump: PID: 1. Write rg=1, off=1, vaddrr=0x00001, pgn=0, offpg=1 val=0x30, P:P, D:-, R:R
 print_pgtbl:
- PDG=b5cfe210b5301d30 P4g=b5cfe210b5302d40 PUD=b5cfe210b5303d50 PMD=b5cfe210b5304d60
+ PGD=0x7984980069e0 P4D=0x7984980079f0 PUD=0x798498008a00 PMD=0x798498009a10
 Time slot   4
-	CPU 0: Put process  1 to run queue
-	CPU 0: Dispatched process  1
-libwrite:502
+IODump: PID: 1. Write rg=1, off=2, vaddrr=0x00002, pgn=0, offpg=2 val=0xff, P:P, D:-, R:R
 print_pgtbl:
- PDG=b5cfe210b5301d30 P4g=b5cfe210b5302d40 PUD=b5cfe210b5303d50 PMD=b5cfe210b5304d60
+ PGD=0x7984980069e0 P4D=0x7984980079f0 PUD=0x798498008a00 PMD=0x798498009a10
 Time slot   5
-libwrite:502
-print_pgtbl:
- PDG=b5cfe210b5301d30 P4g=b5cfe210b5302d40 PUD=b5cfe210b5303d50 PMD=b5cfe210b5304d60
-Time slot   6
 	CPU 0: Put process  1 to run queue
 	CPU 0: Dispatched process  1
-Time slot   7
+Time slot   6
 	CPU 0: Processed  1 has finished
 	CPU 0 stopped
