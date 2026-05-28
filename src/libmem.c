@@ -188,10 +188,9 @@ int liballoc(struct pcb_t *proc, addr_t size, uint32_t reg_index)
     return -1;
   }
 #ifdef IODUMP
-  /* TODO dump IO content (if needed) */
-  printf("%s:%d\n",__func__,__LINE__);
+  printf("liballoc: %d\n", (int)size);
 #ifdef PAGETBL_DUMP
-  print_pgtbl(proc, 0, -1); // print max TBL
+  print_pgtbl(proc, 0, -1);
 #endif
 #endif
 
@@ -212,15 +211,13 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
   {
     return -1;
   }
-  printf("%s:%d\n",__func__,__LINE__);
+  printf("Freed: reg_index: %d, PID: %d \n", reg_index, proc->pid);
 #ifdef IODUMP
-  /* TODO dump IO content (if needed) */
-
 #ifdef PAGETBL_DUMP
-  print_pgtbl(proc, 0, -1); // print max TBL
+  print_pgtbl(proc, 0, -1);
 #endif
 #endif
-  return 0;//val;
+  return 0;
 }
 
 /*pg_getpage - get the page in ram
@@ -349,16 +346,7 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
 
   int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
 
-  /* TODO 
-   *  MEMPHY_read(caller->krnl->mram, phyaddr, data);
-   *  MEMPHY READ 
-   *  SYSCALL 17 sys_memmap with SYSMEM_IO_READ
-   */
   MEMPHY_read(caller->krnl->mram, phyaddr, data);
-  struct sc_regs regs;
-  regs.a1 = SYSMEM_IO_READ;
-  regs.a2 = phyaddr;
-  _syscall(caller->krnl, caller->pid, 17, &regs);
   SETBIT(mm->pgd[pgn], PAGING_PTE_REFERENCED_MASK);
 
   return 0;
@@ -382,18 +370,7 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
     return -1; /* invalid page access */
 
   int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
-  /* TODO 
-   *  MEMPHY_write(caller->krnl->mram, phyaddr, value);
-   *  MEMPHY WRITE with SYSMEM_IO_WRITE 
-   * SYSCALL 17 sys_memmap
-   */
-  
   MEMPHY_write(caller->krnl->mram, phyaddr, value);
-  struct sc_regs regs;
-  regs.a1 = SYSMEM_IO_WRITE;
-  regs.a2 = phyaddr;
-  regs.a3 = value;
-  _syscall(caller->krnl, caller->pid, 17, &regs);
   SETBIT(mm->pgd[pgn], PAGING_PTE_RESERVE_MASK);
   SETBIT(mm->pgd[pgn], PAGING_PTE_REFERENCED_MASK);
   SETBIT(mm->pgd[pgn], PAGING_PTE_DIRTY_MASK);
@@ -440,16 +417,28 @@ int libread(
     uint32_t* destination)
 {
   BYTE data;
-  printf("%s:%d\n",__func__,__LINE__);
   int val = __read(proc, 0, source, offset, &data);
   *destination = data;
 #ifdef IODUMP
-  /* TODO dump IO content (if needed) */
+  {
+    struct vm_rg_struct *currg = get_symrg_byid(proc->krnl->mm, source);
+    if (currg && currg->rg_start < currg->rg_end) {
+      addr_t vaddr = currg->rg_start + offset;
+      addr_t pgn   = PAGING_PGN(vaddr);
+      addr_t offpg = PAGING_OFFST(vaddr);
+      uint32_t pte = pte_get_entry(proc, pgn);
+      printf("IODump: PID: %d. Read rg=%d, off=%lu, vaddrr=0x%05x, pgn=%lu, offpg=%lu val=0x%x, P:%s, D:%s, R:%s\n",
+          proc->pid, (int)source, (unsigned long)offset, (unsigned int)vaddr,
+          (unsigned long)pgn, (unsigned long)offpg, (unsigned char)data,
+          PAGING_PAGE_PRESENT(pte) ? "P" : "-",
+          (pte & PAGING_PTE_DIRTY_MASK)      ? "D" : "-",
+          (pte & PAGING_PTE_REFERENCED_MASK) ? "R" : "-");
+    }
+  }
 #ifdef PAGETBL_DUMP
-  print_pgtbl(proc, 0, -1); // print max TBL
+  print_pgtbl(proc, 0, -1);
 #endif
 #endif
-  
   return val;
 }
 
@@ -492,11 +481,24 @@ int libwrite(
   {
     return -1;
   }
-  printf("%s:%d\n",__func__,__LINE__);
 #ifdef IODUMP
-  /* TODO dump IO content (if needed) */
+  {
+    struct vm_rg_struct *currg = get_symrg_byid(proc->krnl->mm, destination);
+    if (currg && currg->rg_start < currg->rg_end) {
+      addr_t vaddr = currg->rg_start + offset;
+      addr_t pgn   = PAGING_PGN(vaddr);
+      addr_t offpg = PAGING_OFFST(vaddr);
+      uint32_t pte = pte_get_entry(proc, pgn);
+      printf("IODump: PID: %d. Write rg=%d, off=%lu, vaddrr=0x%05x, pgn=%lu, offpg=%lu val=0x%x, P:%s, D:%s, R:%s\n",
+          proc->pid, (int)destination, (unsigned long)offset, (unsigned int)vaddr,
+          (unsigned long)pgn, (unsigned long)offpg, (unsigned char)data,
+          PAGING_PAGE_PRESENT(pte) ? "P" : "-",
+          (pte & PAGING_PTE_DIRTY_MASK)      ? "D" : "-",
+          (pte & PAGING_PTE_REFERENCED_MASK) ? "R" : "-");
+    }
+  }
 #ifdef PAGETBL_DUMP
-  print_pgtbl(proc, 0, -1); // print max TBL
+  print_pgtbl(proc, 0, -1);
 #endif
 #endif
   return val;
