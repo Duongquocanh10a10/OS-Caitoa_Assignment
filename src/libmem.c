@@ -809,9 +809,10 @@ int __write_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset,
 {
   /* TODO: provide OS memory operator for kernel memory region */
   //krnl->krnl_pgd ... or krnl->pgd ... based on kmem implementation strategy
-  pthread_mutex_lock(&mmvm_lock);
+  
   if (!caller || !caller->krnl || !caller->krnl->mm) return -1;
   if (rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ) return -1;
+  pthread_mutex_lock(&mmvm_lock);
   struct vm_rg_struct *currg;
   addr_t vaddr;
   int pgn, off;
