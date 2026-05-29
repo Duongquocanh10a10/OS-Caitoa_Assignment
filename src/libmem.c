@@ -211,8 +211,10 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
   {
     return -1;
   }
-  printf("Freed: reg_index: %d, PID: %d \n", reg_index, proc->pid);
+  
+printf("%s:%d\n",__func__,__LINE__);
 #ifdef IODUMP
+  printf("libfree_dump: reg_index: %d, PID: %d \n", reg_index, proc->pid);
 #ifdef PAGETBL_DUMP
   print_pgtbl(proc, 0, -1);
 #endif
@@ -420,20 +422,19 @@ int libread(
   int val = __read(proc, 0, source, offset, &data);
   *destination = data;
 #ifdef IODUMP
-  {
-    struct vm_rg_struct *currg = get_symrg_byid(proc->krnl->mm, source);
-    if (currg && currg->rg_start < currg->rg_end) {
-      addr_t vaddr = currg->rg_start + offset;
-      addr_t pgn   = PAGING_PGN(vaddr);
-      addr_t offpg = PAGING_OFFST(vaddr);
-      uint32_t pte = pte_get_entry(proc, pgn);
-      printf("IODump: PID: %d. Read rg=%d, off=%lu, vaddrr=0x%05x, pgn=%lu, offpg=%lu val=0x%x, P:%s, D:%s, R:%s\n",
-          proc->pid, (int)source, (unsigned long)offset, (unsigned int)vaddr,
-          (unsigned long)pgn, (unsigned long)offpg, (unsigned char)data,
-          PAGING_PAGE_PRESENT(pte) ? "P" : "-",
-          (pte & PAGING_PTE_DIRTY_MASK)      ? "D" : "-",
-          (pte & PAGING_PTE_REFERENCED_MASK) ? "R" : "-");
-    }
+  struct vm_rg_struct *currg = get_symrg_byid(proc->krnl->mm, source);
+  if (currg && currg->rg_start < currg->rg_end) {
+    addr_t vaddr = currg->rg_start + offset;
+    addr_t pgn = PAGING_PGN(vaddr);
+    addr_t offpg = PAGING_OFFST(vaddr);
+    uint32_t pte = pte_get_entry(proc, pgn);
+    printf("libread dump: PID: %d. Read rg=%d, off=%lu, vaddrr=0x%05x, pgn=%lu, offpg=%lu val=0x%x, P:%s, D:%s, R:%s\n",
+        proc->pid, (int)source, (unsigned long)offset, (unsigned int)vaddr,
+        (unsigned long)pgn, (unsigned long)offpg, (unsigned char)data,
+        PAGING_PAGE_PRESENT(pte) ? "P" : "-",
+        (pte & PAGING_PTE_DIRTY_MASK) ? "D" : "-",
+        (pte & PAGING_PTE_REFERENCED_MASK) ? "R" : "-");
+    
   }
 #ifdef PAGETBL_DUMP
   print_pgtbl(proc, 0, -1);
@@ -482,20 +483,18 @@ int libwrite(
     return -1;
   }
 #ifdef IODUMP
-  {
-    struct vm_rg_struct *currg = get_symrg_byid(proc->krnl->mm, destination);
-    if (currg && currg->rg_start < currg->rg_end) {
-      addr_t vaddr = currg->rg_start + offset;
-      addr_t pgn   = PAGING_PGN(vaddr);
-      addr_t offpg = PAGING_OFFST(vaddr);
-      uint32_t pte = pte_get_entry(proc, pgn);
-      printf("IODump: PID: %d. Write rg=%d, off=%lu, vaddrr=0x%05x, pgn=%lu, offpg=%lu val=0x%x, P:%s, D:%s, R:%s\n",
-          proc->pid, (int)destination, (unsigned long)offset, (unsigned int)vaddr,
-          (unsigned long)pgn, (unsigned long)offpg, (unsigned char)data,
-          PAGING_PAGE_PRESENT(pte) ? "P" : "-",
-          (pte & PAGING_PTE_DIRTY_MASK)      ? "D" : "-",
-          (pte & PAGING_PTE_REFERENCED_MASK) ? "R" : "-");
-    }
+  struct vm_rg_struct *currg = get_symrg_byid(proc->krnl->mm, destination);
+  if (currg && currg->rg_start < currg->rg_end) {
+    addr_t vaddr = currg->rg_start + offset;
+    addr_t pgn = PAGING_PGN(vaddr);
+    addr_t offpg = PAGING_OFFST(vaddr);
+    uint32_t pte = pte_get_entry(proc, pgn);
+    printf("libwrite dump: PID: %d. Write rg=%d, off=%lu, vaddrr=0x%05x, pgn=%lu, offpg=%lu val=0x%x, P:%s, D:%s, R:%s\n",
+        proc->pid, (int)destination, (unsigned long)offset, (unsigned int)vaddr,
+        (unsigned long)pgn, (unsigned long)offpg, (unsigned char)data,
+        PAGING_PAGE_PRESENT(pte) ? "P" : "-",
+        (pte & PAGING_PTE_DIRTY_MASK) ? "D" : "-",
+        (pte & PAGING_PTE_REFERENCED_MASK) ? "R" : "-");
   }
 #ifdef PAGETBL_DUMP
   print_pgtbl(proc, 0, -1);
