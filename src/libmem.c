@@ -262,7 +262,7 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
       }
 
       pte_set_fpn(caller, pgn, tgtfpn);
-      SETBIT(mm->pgd[pgn], PAGING_PTE_RESERVE_MASK);
+      SETBIT(mm->pgd[pgn], PAGING_PTE_REFERENCED_MASK);
       enlist_pgn_node(&mm->fifo_pgn, pgn);
 
       pte = pte_get_entry(caller, pgn);
@@ -321,7 +321,7 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
     /* Update its online status of the target page */
     //pte_set_fpn(...);
     pte_set_fpn(caller, pgn, vicfpn);
-    SETBIT(mm->pgd[pgn], PAGING_PTE_RESERVE_MASK);
+    SETBIT(mm->pgd[pgn], PAGING_PTE_REFERENCED_MASK);
     CLRBIT(mm->pgd[pgn], PAGING_PTE_DIRTY_MASK);
     enlist_pgn_node(&mm->fifo_pgn, pgn);
     pte = pte_get_entry(caller, pgn);
@@ -373,7 +373,6 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
 
   int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
   MEMPHY_write(caller->krnl->mram, phyaddr, value);
-  SETBIT(mm->pgd[pgn], PAGING_PTE_RESERVE_MASK);
   SETBIT(mm->pgd[pgn], PAGING_PTE_REFERENCED_MASK);
   SETBIT(mm->pgd[pgn], PAGING_PTE_DIRTY_MASK);
   return 0;
@@ -847,7 +846,7 @@ int __write_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset,
   regs.a3 = value;
   _syscall(caller->krnl, caller->pid, 17, &regs);
 
-  SETBIT(caller->krnl->krnl_pgd[pgn], PAGING_PTE_RESERVE_MASK);
+  SETBIT(caller->krnl->krnl_pgd[pgn], PAGING_PTE_REFERENCED_MASK);
   SETBIT(caller->krnl->krnl_pgd[pgn], PAGING_PTE_DIRTY_MASK);
   
   pthread_mutex_unlock(&mmvm_lock);
@@ -953,7 +952,7 @@ int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
   for(int i =0; i < count; i++){
     pgn = mm->fifo_pgn->pgn;
     pte = mm->pgd[pgn];
-    int r = (pte & PAGING_PTE_RESERVE_MASK) != 0;
+    int r = (pte & PAGING_PTE_REFERENCED_MASK) != 0;
     int d = (pte & PAGING_PTE_DIRTY_MASK) != 0;
 
     if(!r && !d){
@@ -968,7 +967,7 @@ int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
   for(int i = 0; i < count; i++){
     pgn = mm->fifo_pgn->pgn;
     pte = mm->pgd[pgn];
-    int r = (pte & PAGING_PTE_RESERVE_MASK) != 0;
+    int r = (pte & PAGING_PTE_REFERENCED_MASK) != 0;
     int d = (pte & PAGING_PTE_DIRTY_MASK) != 0;
 
     if(!r && d){
@@ -979,7 +978,7 @@ int find_victim_page(struct mm_struct *mm, addr_t *retpgn)
       return 0;
     }
     if(r){
-      CLRBIT(mm->pgd[pgn], PAGING_PTE_RESERVE_MASK);
+      CLRBIT(mm->pgd[pgn], PAGING_PTE_REFERENCED_MASK);
     }
     rotate_head_to_tail(&mm->fifo_pgn);
   }
